@@ -24,6 +24,8 @@ load_packages() {
         line="${line%"${line##*[![:space:]]}"}"
         [[ -n "$line" ]] && result+=("$line")
     done < "$manifest"
+
+    return 0
 }
 
 root_dir="$1"
