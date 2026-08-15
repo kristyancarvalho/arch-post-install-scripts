@@ -43,7 +43,7 @@ fi
 description="Manual snapshot $(date '+%Y-%m-%d %H:%M:%S')"
 snapshot_options=(--print-number --description "$description" --cleanup-algorithm number)
 
-if snapper --help | grep -q -- '--read-write'; then
+if grep -q -- '--read-write' <<< "$(snapper --help)"; then
     snapshot_options+=(--read-write)
 fi
 
