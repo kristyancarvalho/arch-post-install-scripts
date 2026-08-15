@@ -8,3 +8,4 @@ starship
 bat
 eza
 tmux
+snap-pac

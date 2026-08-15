@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+require_command() {
+    local command_name="$1"
+
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        printf '%s\n' "$command_name is required." >&2
+        exit 1
+    fi
+}
+
+find_root_config() {
+    local config
+    local configs
+    local subvolume
+
+    if ! configs="$(snapper --csvout --no-headers list-configs --columns config,subvolume)"; then
+        return 1
+    fi
+
+    while IFS=, read -r config subvolume; do
+        if [[ "$subvolume" == / ]]; then
+            printf '%s\n' "$config"
+            return 0
+        fi
+    done <<< "$configs"
+
+    return 1
+}
+
+require_command snapper
+require_command limine-snapper-sync
+
+root_config="$(find_root_config || true)"
+
+if [[ -z "$root_config" ]]; then
+    printf '%s\n' 'No Snapper configuration manages the root filesystem.' >&2
+    exit 1
+fi
+
+description="Manual snapshot $(date '+%Y-%m-%d %H:%M:%S')"
+snapshot_options=(--print-number --description "$description" --cleanup-algorithm number)
+
+if grep -q -- '--read-write' <<< "$(snapper --help)"; then
+    snapshot_options+=(--read-write)
+fi
+
+if ! snapshot_id="$(snapper -c "$root_config" create "${snapshot_options[@]}")"; then
+    printf '%s\n' 'Failed to create the manual snapshot.' >&2
+    exit 1
+fi
+
+snapshot_id="${snapshot_id//[[:space:]]/}"
+
+if [[ ! "$snapshot_id" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' 'Snapper returned an invalid snapshot ID.' >&2
+    exit 1
+fi
+
+if ! limine-snapper-sync --no-force-save; then
+    printf '%s\n' "Snapshot $snapshot_id was created, but Limine synchronization failed." >&2
+    exit 1
+fi
+
+printf '%s\n' "Snapshot $snapshot_id created and synchronized with Limine."
