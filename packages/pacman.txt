@@ -1,0 +1,11 @@
+fzf
+zsh-autosuggestions
+zsh-syntax-highlighting
+fd
+zoxide
+atuin
+starship
+bat
+eza
+tmux
+snap-pac
