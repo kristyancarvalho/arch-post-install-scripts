@@ -1,14 +1,21 @@
-# Arch Linux Post-Install Scripts
+<div align="center">
+  <h1>Arch Linux Post-Install</h1>
+  <p>A small, idempotent bootstrap for packages, Zsh, and automatic Btrfs snapshots.</p>
 
-A small, idempotent bootstrap for preparing a fresh Arch Linux installation. It installs the base package toolchain, bootstraps `paru`, installs package manifests, and configures a ready-to-use Zsh environment.
+  ![Arch Linux](https://img.shields.io/badge/Arch-1793D1?logo=archlinux&logoColor=fff)
+  ![Bash](https://img.shields.io/badge/Bash-4EAA25?logo=gnubash&logoColor=fff)
+  ![Zsh](https://img.shields.io/badge/Zsh-F15A24)
+  ![Paru](https://img.shields.io/badge/AUR-Paru-1793D1)
+  ![Snapper](https://img.shields.io/badge/Snapper-Btrfs-5A67D8)
+  ![Limine](https://img.shields.io/badge/Limine-7C3AED)
+  ![License](https://img.shields.io/github/license/kristyancarvalho/arch-post-install-scripts)
+</div>
 
 ## Requirements
 
-- Arch Linux with `pacman`
-- A normal user with `sudo` access
-- An active internet connection
-
-Do not run the installer as root.
+- Arch Linux with a Btrfs root filesystem
+- Snapper and Limine installed during the Arch installation
+- A normal user with `sudo` access and an internet connection
 
 ## Installation
 
@@ -18,34 +25,21 @@ cd arch-post-install-scripts
 ./install.sh
 ```
 
-The installer updates the system, installs `git`, `base-devel`, and `zsh`, and bootstraps `paru` from its AUR PKGBUILD when needed. It then installs the package manifests, clones Oh My Zsh into `$HOME/.oh-my-zsh`, copies `dotfiles/zshrc` to `$HOME/.zshrc`, and sets Zsh as the current user's login shell.
+## Usage
 
-An existing different `$HOME/.zshrc` is backed up before replacement. An identical installed file is left unchanged.
+Optionally edit the package lists, then run `./install.sh`. It is safe to run again.
 
-## Package manifests
+## Package lists
 
-`packages/pacman.txt` contains one official repository package per line. Empty lines and an empty file are supported.
+- `packages/pacman.txt` contains official repository packages, one per line.
+- `packages/aur.txt` contains packages installed through Paru, one per line.
 
-`packages/aur.txt` contains one AUR package per line. Empty lines and an empty file are supported. Packages in this file are installed together through `paru` as the normal user.
+## Snapshots
 
-## Project structure
+The installer enables timeline cleanup, Pacman pre/post snapshots, and Limine synchronization.
 
-```text
-.
-├── install.sh
-├── packages
-│   ├── pacman.txt
-│   └── aur.txt
-├── dotfiles
-│   └── zshrc
-├── scripts
-│   ├── bootstrap.sh
-│   ├── packages.sh
-│   └── zsh.sh
-├── README.md
-└── LICENSE
-```
+Run `snaplimine` to create a manual snapshot and synchronize the available snapshots with Limine.
 
-## Re-running
+## License
 
-Run `./install.sh` again at any time. Already installed packages, Oh My Zsh, the login shell, and an identical `.zshrc` are left unchanged where possible.
+[MIT](LICENSE)
