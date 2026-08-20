@@ -1,0 +1,7 @@
+[Unit]
+Description=Synchronize Snapper snapshots with Limine
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/arch-snapper-limine-sync

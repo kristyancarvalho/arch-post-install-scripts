@@ -36,9 +36,9 @@ Optionally edit the package lists, then run `./install.sh`. It is safe to run ag
 
 ## Snapshots
 
-The installer enables timeline cleanup, Pacman pre/post snapshots, and Limine synchronization.
+The installer enables timeline cleanup, Pacman pre/post snapshots, and repository-owned Limine synchronization. It detects the mounted FAT boot filesystem and the active Limine 12 configuration, preserves existing entries, and manages only the `Snapshots (Hyprism generated)` menu.
 
-Run `snaplimine` to create a manual snapshot and synchronize the available snapshots with Limine.
+Run `snaplimine` to create a writable manual snapshot and synchronize the available snapshots with Limine. Run `snaplimine sync` to synchronize without creating a snapshot.
 
 ## License
 

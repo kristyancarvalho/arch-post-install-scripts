@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch Snapper snapshots for Limine synchronization
+
+[Path]
+PathChanged=/.snapshots
+Unit=arch-snapper-limine-sync.service
+
+[Install]
+WantedBy=multi-user.target

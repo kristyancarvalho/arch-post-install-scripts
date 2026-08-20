@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+
+import datetime
+import fcntl
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import xml.etree.ElementTree as element_tree
+
+
+GENERATED_TITLE = "/Snapshots (Hyprism generated)"
+CONFIG_PATH = pathlib.Path("/etc/arch-snapper-limine.conf")
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def settings():
+    values = {}
+    try:
+        for line in CONFIG_PATH.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key.strip()] = value.strip()
+    except OSError as error:
+        fail(f"Unable to read {CONFIG_PATH}: {error}")
+    snapper_config = values.get("SNAPPER_CONFIG", "")
+    limine_config = values.get("LIMINE_CONFIG", "")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", snapper_config):
+        fail("The configured Snapper name is invalid.")
+    if not limine_config.startswith("/") or "\x00" in limine_config:
+        fail("The configured Limine path is invalid.")
+    return snapper_config, pathlib.Path(limine_config)
+
+
+def assignment(path, key):
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            name, separator, value = line.partition("=")
+            if separator and name.strip() == key:
+                return value.strip().strip('"')
+    except OSError as error:
+        fail(f"Unable to read {path}: {error}")
+    return ""
+
+
+def snapshot_root(config):
+    subvolume = assignment(pathlib.Path("/etc/snapper/configs") / config, "SUBVOLUME")
+    if not subvolume.startswith("/") or ".." in pathlib.PurePath(subvolume).parts:
+        fail("The Snapper subvolume path is invalid.")
+    return pathlib.Path(subvolume) / ".snapshots"
+
+
+def snapshot_records(directory):
+    for _ in range(4):
+        pending = [path for path in directory.iterdir() if path.name.isdigit() and not (path / "info.xml").is_file()]
+        if not pending:
+            break
+        time.sleep(0.25)
+    records = []
+    for directory_entry in sorted(directory.iterdir(), key=lambda path: int(path.name) if path.name.isdigit() else -1):
+        if not directory_entry.name.isdigit():
+            continue
+        info_path = directory_entry / "info.xml"
+        volume_path = directory_entry / "snapshot"
+        if not info_path.is_file() or not volume_path.is_dir():
+            continue
+        try:
+            root = element_tree.parse(info_path).getroot()
+            number = int(root.findtext("num", directory_entry.name))
+            description = root.findtext("description", "snapshot")
+            date_text = root.findtext("date", "")
+        except (OSError, ValueError, element_tree.ParseError):
+            continue
+        records.append((number, date_text, description, volume_path))
+    return records
+
+
+def top_level(line):
+    return re.match(r"^\s*/[^/]", line) is not None
+
+
+def without_generated(lines):
+    output = []
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != GENERATED_TITLE:
+            output.append(lines[index])
+            index += 1
+            continue
+        index += 1
+        while index < len(lines) and not top_level(lines[index]):
+            index += 1
+    while output and not output[-1].strip():
+        output.pop()
+    return output
+
+
+def boot_entry(lines):
+    starts = [index for index, line in enumerate(lines) if top_level(line)]
+    starts.append(len(lines))
+    for position in range(len(starts) - 1):
+        block = lines[starts[position]:starts[position + 1]]
+        text = "\n".join(block)
+        protocol = re.search(r"^\s*protocol:\s*(efi|linux)\s*$", text, re.MULTILINE | re.IGNORECASE)
+        subvolume = re.search(r"\brootflags=[^\n]*\bsubvol=", text)
+        if protocol and subvolume:
+            return block
+    fail("No Limine Linux entry with a Btrfs subvol root flag was found.")
+
+
+def btrfs_path(path):
+    result = subprocess.run(["btrfs", "subvolume", "show", str(path)], text=True, capture_output=True)
+    if result.returncode != 0:
+        fail(f"Unable to inspect Btrfs snapshot {path}.")
+    first_line = result.stdout.splitlines()[0].strip() if result.stdout.splitlines() else ""
+    labeled = re.search(r"^\s*Path:\s*(.+?)\s*$", result.stdout, re.MULTILINE)
+    reported = labeled.group(1).strip() if labeled else first_line
+    if not reported or reported.startswith("/") or ".." in pathlib.PurePath(reported).parts:
+        fail(f"Btrfs did not report a path for {path}.")
+    return reported
+
+
+def make_writable(path):
+    result = subprocess.run(["btrfs", "property", "set", "-ts", str(path), "ro", "false"], capture_output=True)
+    if result.returncode != 0:
+        fail(f"Unable to make snapshot {path.parent.name} bootable.")
+
+
+def title(number, date_text, description):
+    try:
+        timestamp = datetime.datetime.fromisoformat(date_text).replace(tzinfo=datetime.timezone.utc).astimezone()
+        date_label = timestamp.strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        date_label = date_text or "unknown date"
+    label = re.sub(r"[\x00-\x1f/]+", " ", description or "snapshot")
+    label = re.sub(r"\s+", " ", label).strip()[:72]
+    return f"//Snapshot {number} · {date_label} · {label}"
+
+
+def snapshot_entry(source, record):
+    number, date_text, description, volume_path = record
+    make_writable(volume_path)
+    subvolume = btrfs_path(volume_path)
+    block = [title(number, date_text, description)]
+    replaced = False
+    for line in source[1:]:
+        if re.match(r"^\s*cmdline:\s*", line, re.IGNORECASE):
+            line, count = re.subn(r"(\bsubvol=)[^,\s]+", lambda match: match.group(1) + subvolume, line, count=1)
+            replaced = replaced or count == 1
+        block.append(line)
+    if not replaced:
+        fail("The Limine source entry did not expose a replaceable subvolume path.")
+    while block and not block[-1].strip():
+        block.pop()
+    return block
+
+
+def publish(path, content):
+    previous = path.read_text(encoding="utf-8")
+    if previous == content:
+        return False
+    backup = path.with_name(path.name + ".hyprism-backup")
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".limine.conf.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary_name, path.stat().st_mode)
+        os.replace(temporary_name, path)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+    return True
+
+
+def main():
+    if os.geteuid() != 0:
+        fail("Limine snapshot synchronization must run as root.")
+    snapper_config, limine_path = settings()
+    if not limine_path.is_file():
+        fail(f"Limine configuration does not exist: {limine_path}")
+    directory = snapshot_root(snapper_config)
+    if not directory.is_dir():
+        fail(f"Snapper snapshot directory does not exist: {directory}")
+    pathlib.Path("/run/lock").mkdir(parents=True, exist_ok=True)
+    with open("/run/lock/arch-snapper-limine.lock", "w", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        original = limine_path.read_text(encoding="utf-8").splitlines()
+        base = without_generated(original)
+        source = boot_entry(base)
+        generated = [GENERATED_TITLE]
+        records = snapshot_records(directory)
+        for record in records:
+            generated.extend(snapshot_entry(source, record))
+        content = "\n".join(base + [""] + generated) + "\n"
+        changed = publish(limine_path, content)
+    state = "Updated" if changed else "Unchanged"
+    print(f"{state}: {limine_path} ({len(records)} snapshots)")
+
+
+if __name__ == "__main__":
+    main()

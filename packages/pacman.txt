@@ -8,4 +8,7 @@ starship
 bat
 eza
 tmux
+btrfs-progs
+limine
+snapper
 snap-pac
